@@ -1,0 +1,72 @@
+name: Release MSIX
+
+# Runs when you push a version tag, e.g.:  git tag v1.2.0 && git push origin v1.2.0
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+
+      - name: Install osslsigncode
+        run: sudo apt-get update && sudo apt-get install -y osslsigncode
+
+      - name: Work out the MSIX version from the tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          V="${TAG#v}"
+          # v1.2.3 -> 1.2.3.0, v1.2.3.4 -> 1.2.3.4
+          if [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then V="$V.0"; fi
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' is not a version like v1.2.3 or v1.2.3.4"; exit 1
+          fi
+          for part in ${V//./ }; do
+            if [ "$part" -gt 65535 ]; then echo "::error::Each version part must be <= 65535"; exit 1; fi
+          done
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Restore signing certificate
+        env:
+          SIGNING_CERT_PEM: ${{ secrets.SIGNING_CERT_PEM }}
+          SIGNING_KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+        run: |
+          if [ -z "$SIGNING_CERT_PEM" ] || [ -z "$SIGNING_KEY_PEM" ]; then
+            echo "::error::Add the SIGNING_CERT_PEM and SIGNING_KEY_PEM repository secrets"; exit 1
+          fi
+          printf '%s\n' "$SIGNING_CERT_PEM" > cert.pem
+          printf '%s\n' "$SIGNING_KEY_PEM" > key.pem
+          chmod 600 key.pem
+
+      - name: Build and sign
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REQUIRE_CERT: "1"
+          # Set the repository variable BASE_URL to host updates on your own server.
+          # Otherwise the files are served from GitHub Releases.
+          BASE_URL: ${{ vars.BASE_URL || format('https://github.com/{0}/releases/latest/download', github.repository) }}
+          PACKAGE_BASE_URL: ${{ vars.BASE_URL || format('https://github.com/{0}/releases/download/{1}', github.repository, github.ref_name) }}
+        run: chmod +x build.sh && ./build.sh
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f key.pem
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "Hello World ${{ steps.version.outputs.version }}" \
+            --generate-notes

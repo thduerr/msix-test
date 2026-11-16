@@ -1,0 +1,9 @@
+# Signing material - never commit
+key.pem
+cert.pem
+*.pfx
+
+# Build output
+build/
+release/
+*.msix
