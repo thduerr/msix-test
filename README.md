@@ -1,4 +1,4 @@
-# Hello World MSIX (with auto-update)
+# Hello World MSIX (with auto-update) + portable exe
 
 - `src/main.go` – the app (shows "Hello, World!" and its installed version)
 - `pkg/AppxManifest.xml` – the MSIX package manifest (version is set by build.sh)
@@ -9,7 +9,14 @@
 
     VERSION=1.0.0.0 BASE_URL=https://your-server/helloworld ./build.sh
 
-Needs go, python3, openssl, osslsigncode. Output goes to `release/`. Upload
+Needs go, python3, openssl, osslsigncode. Output goes to `release/`:
+
+- `HelloWorld_<version>_x64.msix` – installable, auto-updating package
+- `HelloWorld_<version>_x64.exe` – portable exe, runs without installing (no auto-update)
+- `HelloWorld.appinstaller` – update file Windows checks
+- `HelloWorld.cer` – certificate users trust before installing the MSIX
+
+ Upload
 `HelloWorld.appinstaller` and the new `.msix` to BASE_URL.
 The first run creates `cert.pem`/`key.pem`: keep them, every release must be signed with the same certificate.
 

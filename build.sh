@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a signed, auto-updating HelloWorld MSIX release on Linux/macOS.
+# Builds a signed, auto-updating HelloWorld MSIX release plus a portable .exe on Linux/macOS.
 # Requires: go, python3, openssl, osslsigncode (2.6+)
 #
 # Usage: VERSION=1.0.1.0 BASE_URL=https://example.com/helloworld ./build.sh
@@ -17,14 +17,11 @@ PACKAGE_BASE_URL="${PACKAGE_BASE_URL%/}"
 NAME="HelloWorld.Sample"
 PUBLISHER="CN=HelloWorld Dev"
 MSIX="HelloWorld_${VERSION}_x64.msix"
+EXE="HelloWorld_${VERSION}_x64.exe"
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION must look like 1.2.3.0"; exit 1; }
 
 rm -rf build && mkdir -p build/pkg/Assets release
-sed "s/Version=\"[0-9.]*\"/Version=\"$VERSION\"/" pkg/AppxManifest.xml > build/pkg/AppxManifest.xml
-(cd src && GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui -s -w" -o ../build/pkg/HelloWorld.exe .)
-python3 pack.py build/pkg build/unsigned.msix
-
 if [ ! -f cert.pem ] || [ ! -f key.pem ]; then
   if [ "${REQUIRE_CERT:-0}" = 1 ]; then
     echo "cert.pem/key.pem missing; refusing to create a new certificate (updates would break)"; exit 1
@@ -34,6 +31,16 @@ if [ ! -f cert.pem ] || [ ! -f key.pem ]; then
     -addext "extendedKeyUsage=codeSigning"
 fi
 openssl x509 -in cert.pem -outform DER -out release/HelloWorld.cer
+
+# Build and sign the exe once; the same signed exe goes into the MSIX and into release/ as a portable app
+(cd src && GOOS=windows GOARCH=amd64 go build -trimpath \
+  -ldflags "-H=windowsgui -s -w -X main.version=$VERSION" -o ../build/unsigned.exe .)
+osslsigncode sign -certs cert.pem -key key.pem -h sha256 -n "Hello World" \
+  -in build/unsigned.exe -out build/pkg/HelloWorld.exe >/dev/null
+rm -f "release/$EXE" && cp build/pkg/HelloWorld.exe "release/$EXE"
+
+sed "s/Version=\"[0-9.]*\"/Version=\"$VERSION\"/" pkg/AppxManifest.xml > build/pkg/AppxManifest.xml
+python3 pack.py build/pkg build/unsigned.msix
 rm -f "release/$MSIX"
 osslsigncode sign -certs cert.pem -key key.pem -in build/unsigned.msix -out "release/$MSIX"
 
@@ -55,5 +62,5 @@ cat > release/HelloWorld.appinstaller <<XML
 XML
 
 rm -rf build
-echo "Built release/$MSIX and release/HelloWorld.appinstaller (version $VERSION)"
+echo "Built release/$MSIX, release/$EXE and release/HelloWorld.appinstaller (version $VERSION)"
 echo "Upload HelloWorld.appinstaller to $BASE_URL/ and $MSIX to $PACKAGE_BASE_URL/"
